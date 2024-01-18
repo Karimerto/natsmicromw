@@ -5,7 +5,6 @@ package middleware
 import (
 	"time"
 
-	// "github.com/Karimerto/natsmicromw"
 	"github.com/nats-io/nats.go/micro"
 
 	// For prometheus metrics
