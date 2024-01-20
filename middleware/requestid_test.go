@@ -52,20 +52,20 @@ func TestRequestIdMiddleware(t *testing.T) {
 			t.Fatalf("Could not connect to NATS server: %v", err)
 		}
 		// Create router and connect to test server
-		nr, err := natsmicromw.AddContextService(nc, micro.Config{
+		nm, err := natsmicromw.AddContextService(nc, micro.Config{
 			Name:    "TestService",
 			Version: "1.0.0",
 		})
 		if err != nil {
 			t.Fatalf("Could not create micro service: %v", err)
 		}
-		nr = nr.UseContext(RequestIdMiddleware())
+		nm = nm.UseContext(RequestIdMiddleware())
 
 		defer nc.Close()
 
 		reqId := "req-1"
 
-		err = nr.AddContextEndpoint("foo", func(req *natsmicromw.Request) error {
+		err = nm.AddContextEndpoint("foo", func(req *natsmicromw.Request) error {
 			if RequestIdFromContext(req.Context()) != reqId {
 				t.Errorf("request id does not match/not found")
 			}
@@ -107,20 +107,20 @@ func TestRequestIdMiddleware(t *testing.T) {
 			t.Fatalf("Could not connect to NATS server: %v", err)
 		}
 		// Create router and connect to test server
-		nr, err := natsmicromw.AddContextService(nc, micro.Config{
+		nm, err := natsmicromw.AddContextService(nc, micro.Config{
 			Name:    "TestService",
 			Version: "1.0.0",
 		})
 		if err != nil {
 			t.Fatalf("Could not create micro service: %v", err)
 		}
-		nr = nr.UseContext(RequestIdMiddleware(headerTag))
+		nm = nm.UseContext(RequestIdMiddleware(headerTag))
 
 		defer nc.Close()
 
 		reqId := "req-1"
 
-		err = nr.AddContextEndpoint("foo", func(req *natsmicromw.Request) error {
+		err = nm.AddContextEndpoint("foo", func(req *natsmicromw.Request) error {
 			if RequestIdFromContext(req.Context()) != reqId {
 				t.Errorf("request id does not match/not found")
 			}
@@ -159,18 +159,18 @@ func TestRequestIdMiddleware(t *testing.T) {
 			t.Fatalf("Could not connect to NATS server: %v", err)
 		}
 		// Create router and connect to test server
-		nr, err := natsmicromw.AddContextService(nc, micro.Config{
+		nm, err := natsmicromw.AddContextService(nc, micro.Config{
 			Name:    "TestService",
 			Version: "1.0.0",
 		})
 		if err != nil {
 			t.Fatalf("Could not create micro service: %v", err)
 		}
-		nr = nr.UseContext(RequestIdMiddleware())
+		nm = nm.UseContext(RequestIdMiddleware())
 
 		defer nc.Close()
 
-		err = nr.AddContextEndpoint("foo", func(req *natsmicromw.Request) error {
+		err = nm.AddContextEndpoint("foo", func(req *natsmicromw.Request) error {
 			reqId := RequestIdFromContext(req.Context())
 			if len(reqId) == 0 {
 				t.Errorf("no request id found")
