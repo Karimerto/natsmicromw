@@ -27,3 +27,8 @@ func (r *Request) WithContext(ctx context.Context) *Request {
 		ctx,
 	}
 }
+
+func (r *Request) RespondWithOriginalHeaders(response []byte, opts ...micro.RespondOpt) error {
+	headers := r.Headers()
+	return r.Respond(response, append(opts, micro.WithHeaders(headers))...)
+}

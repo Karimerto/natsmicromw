@@ -71,7 +71,7 @@ func TestRequestIdMiddleware(t *testing.T) {
 			}
 
 			// Send response with same content
-			if err := req.Respond(req.Data(), micro.WithHeaders(req.Headers())); err != nil {
+			if err := req.RespondWithOriginalHeaders(req.Data()); err != nil {
 				t.Errorf("Failed to publish reply: %v", err)
 			}
 
