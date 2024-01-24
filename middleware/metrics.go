@@ -69,3 +69,31 @@ func MetricsMiddleware(next micro.Handler) micro.Handler {
 			Observe(float64(payloadSize))
 	})
 }
+
+// Same middleware but with context support
+func MetricsContextMiddleware(next natsmicromw.ContextHandlerFunc) natsmicromw.ContextHandlerFunc {
+	return func(req *natsmicromw.Request) error {
+		// Increment the message count for the subject
+		prometheusMessageCount.With(prometheus.Labels{"subject": req.Subject()}).Inc()
+
+		// Record start time
+		start := time.Now()
+
+		// Call the next middleware or handler function
+		err := next(req)
+
+		// Record elapsed time and payload size
+		elapsed := time.Since(start)
+		payloadSize := len(req.Data())
+
+		// Report metrics to Prometheus or other monitoring system
+		prometheusRequestDuration.
+			With(prometheus.Labels{"subject": req.Subject()}).
+			Observe(float64(elapsed.Seconds()))
+		prometheusPayloadSize.
+			With(prometheus.Labels{"subject": req.Subject()}).
+			Observe(float64(payloadSize))
+
+		return err
+	}
+}
