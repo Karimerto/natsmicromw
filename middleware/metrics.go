@@ -7,6 +7,8 @@ import (
 
 	"github.com/nats-io/nats.go/micro"
 
+	"github.com/Karimerto/natsmicromw"
+
 	// For prometheus metrics
 	"github.com/prometheus/client_golang/prometheus"
 )
