@@ -2,7 +2,9 @@
 Package `natsmicromw` provides middleware functionality for NATS-based
 Microservices in Go. It implements `micro.Service` and provides a thin wrapper
 for the underlying Service. This also adds a context-enabled custom `Request`
-for carrying the same context through the whole middleware stack.
+for carrying the same context through the whole middleware stack. There is also
+a `MicroRequest` and `MicroReply` that allows data manipulation for various
+middleware functions.
 */
 
 package natsmicromw
@@ -20,6 +22,7 @@ type Service struct {
 	svc        micro.Service
 	mw         []MiddlewareFunc
 	cmw        []ContextMiddlewareFunc
+	mmw        []MicroMiddlewareFunc
 	defaultCtx context.Context
 }
 
@@ -36,6 +39,10 @@ type ContextHandlerFunc func(*Request) error
 
 // Middleware function that takes a `ContextHandlerFunc` and returns a new `ContextHandlerFunc`
 type ContextMiddlewareFunc func(ContextHandlerFunc) ContextHandlerFunc
+
+type MicroHandlerFunc func(*MicroRequest) (*MicroReply, error)
+
+type MicroMiddlewareFunc func(MicroHandlerFunc) MicroHandlerFunc
 
 func wrapHandler(handler micro.Handler, mws ...MiddlewareFunc) micro.Handler {
 	// Create a chain of middleware handlers
@@ -70,6 +77,7 @@ func (s *Service) WithMiddleware(fns ...MiddlewareFunc) *Service {
 		svc:        s.svc,
 		mw:         append(s.mw, fns...),
 		cmw:        s.cmw,
+		mmw:        s.mmw,
 		defaultCtx: s.defaultCtx,
 	}
 }
@@ -137,6 +145,7 @@ func (s *Service) WithContextMiddleware(fns ...ContextMiddlewareFunc) *Service {
 		svc:        s.svc,
 		mw:         s.mw,
 		cmw:        append(s.cmw, fns...),
+		mmw:        s.mmw,
 		defaultCtx: s.defaultCtx,
 	}
 }
@@ -144,6 +153,77 @@ func (s *Service) WithContextMiddleware(fns ...ContextMiddlewareFunc) *Service {
 // UseContext is an alias for WithContextMiddleware, adding middleware functions to the Microservice.
 func (s *Service) UseContext(fns ...ContextMiddlewareFunc) *Service {
 	return s.WithContextMiddleware(fns...)
+}
+
+func wrapMicroHandler(s *Service, handler MicroHandlerFunc) micro.HandlerFunc {
+	return micro.HandlerFunc(func(req micro.Request) {
+		// Use the default context if available, otherwise use background context
+		var ctx context.Context
+		if s.defaultCtx != nil {
+			ctx = s.defaultCtx
+		} else {
+			ctx = context.Background()
+		}
+
+		// ctxReq := &Request{req, ctx}
+		microReq := newMicroRequest(req, ctx)
+
+		// Wrap handler in middleware calls
+		var wrappedMicroHandler MicroHandlerFunc = handler
+		for i := len(s.mmw) - 1; i >= 0; i-- {
+			wrappedMicroHandler = s.mmw[i](wrappedMicroHandler)
+		}
+
+		// Call the top-level handler
+		reply, err := wrappedMicroHandler(microReq)
+
+		// If an error is encountered, respond with it automatically
+		if err != nil {
+			handlerErr, ok := err.(*HandlerError)
+			if !ok {
+				handlerErr = &HandlerError{
+					Description: err.Error(),
+					Code:        "500",
+				}
+			}
+
+			// Send the entire error in the body as well
+			errData, _ := json.Marshal(handlerErr)
+
+			req.Error(handlerErr.Code, handlerErr.Description, errData)
+		} else {
+			req.Respond(reply.Data, micro.WithHeaders(reply.Headers))
+		}
+	})
+}
+
+// AddMicroService creates a new Microservice with middleware support.
+// Note that this version does not support defining an endpoint in the initial config.
+// If any is defined, it will not use any of the context-based middlewares.
+func AddMicroService(nc *nats.Conn, config micro.Config, fns ...MicroMiddlewareFunc) (*Service, error) {
+	svc, err := micro.AddService(nc, config)
+	if err != nil {
+		return nil, err
+	}
+
+	s := &Service{svc: svc, mmw: fns}
+	return s, nil
+}
+
+// WithMicroMiddleware adds middleware functions to the Microservice.
+func (s *Service) WithMicroMiddleware(fns ...MicroMiddlewareFunc) *Service {
+	return &Service{
+		svc:        s.svc,
+		mw:         s.mw,
+		cmw:        s.cmw,
+		mmw:        append(s.mmw, fns...),
+		defaultCtx: s.defaultCtx,
+	}
+}
+
+// UseMicro is an alias for WithMicroMiddleware, adding middleware functions to the Microservice.
+func (s *Service) UseMicro(fns ...MicroMiddlewareFunc) *Service {
+	return s.WithMicroMiddleware(fns...)
 }
 
 // SetDefaultContext sets the default context to be used by the service.
@@ -160,6 +240,11 @@ func (s *Service) AddEndpoint(name string, handler micro.Handler, opts ...micro.
 // AddContextEndpoint registers an endpoint with the given name on a specific subject.
 func (s *Service) AddContextEndpoint(name string, handler ContextHandlerFunc, opts ...micro.EndpointOpt) error {
 	return s.svc.AddEndpoint(name, wrapContextHandler(s, handler), opts...)
+}
+
+// AddMicroEndpoint registers an endpoint with the given name on a specific subject.
+func (s *Service) AddMicroEndpoint(name string, handler MicroHandlerFunc, opts ...micro.EndpointOpt) error {
+	return s.svc.AddEndpoint(name, wrapMicroHandler(s, handler), opts...)
 }
 
 // AddGroup returns a Group interface, allowing for more complex endpoint topologies.
@@ -211,6 +296,11 @@ func (g *Group) AddContextEndpoint(name string, handler ContextHandlerFunc, opts
 	return g.grp.AddEndpoint(name, wrapContextHandler(g.svc, handler), opts...)
 }
 
+// AddMicroEndpoint registers an endpoint with the given name on a specific subject within a group.
+func (g *Group) AddMicroEndpoint(name string, handler MicroHandlerFunc, opts ...micro.EndpointOpt) error {
+	return g.grp.AddEndpoint(name, wrapMicroHandler(g.svc, handler), opts...)
+}
+
 // WithMiddleware adds middleware functions to the Microservice group.
 func (g *Group) WithMiddleware(fns ...MiddlewareFunc) *Group {
 	return &Group{
@@ -218,6 +308,7 @@ func (g *Group) WithMiddleware(fns ...MiddlewareFunc) *Group {
 			svc:        g.svc.svc,
 			mw:         append(g.svc.mw, fns...),
 			cmw:        g.svc.cmw,
+			mmw:        g.svc.mmw,
 			defaultCtx: g.svc.defaultCtx,
 		},
 		grp: g.grp,
@@ -236,6 +327,7 @@ func (g *Group) WithContextMiddleware(fns ...ContextMiddlewareFunc) *Group {
 			svc:        g.svc.svc,
 			mw:         g.svc.mw,
 			cmw:        append(g.svc.cmw, fns...),
+			mmw:        g.svc.mmw,
 			defaultCtx: g.svc.defaultCtx,
 		},
 		grp: g.grp,
@@ -245,4 +337,23 @@ func (g *Group) WithContextMiddleware(fns ...ContextMiddlewareFunc) *Group {
 // UseContext is an alias for WithContextMiddleware, adding context middleware functions to the Microservice group.
 func (g *Group) UseContext(fns ...ContextMiddlewareFunc) *Group {
 	return g.WithContextMiddleware(fns...)
+}
+
+// WithMicroMiddleware adds Micro middleware functions to the Microservice group.
+func (g *Group) WithMicroMiddleware(fns ...MicroMiddlewareFunc) *Group {
+	return &Group{
+		svc: &Service{
+			svc:        g.svc.svc,
+			mw:         g.svc.mw,
+			cmw:        g.svc.cmw,
+			mmw:        append(g.svc.mmw, fns...),
+			defaultCtx: g.svc.defaultCtx,
+		},
+		grp: g.grp,
+	}
+}
+
+// UseMicro is an alias for WithMicroMiddleware, adding Micro middleware functions to the Microservice group.
+func (g *Group) UseMicro(fns ...MicroMiddlewareFunc) *Group {
+	return g.WithMicroMiddleware(fns...)
 }

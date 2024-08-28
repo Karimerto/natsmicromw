@@ -264,6 +264,101 @@ func TestMiddlewareChain(t *testing.T) {
 	})
 }
 
+func TestMicroMiddleware(t *testing.T) {
+	extraBytes := []byte("test")
+	beforeValue := "value"
+	afterValue := "other"
+
+	// define a couple of middleware functions
+	headerMiddleware := func(next MicroHandlerFunc) MicroHandlerFunc {
+		return func(req *MicroRequest) (*MicroReply, error) {
+			// Modify headers
+			req.HeaderSet("before", beforeValue)
+			res, err := next(req)
+			res.HeaderSet("after", afterValue)
+			return res, err
+		}
+	}
+
+	extraMiddleware := func(next MicroHandlerFunc) MicroHandlerFunc {
+		return func(req *MicroRequest) (*MicroReply, error) {
+			// Append some extra data at the end of the reply
+			res, err := next(req)
+			res.Data = append(res.Data, extraBytes...)
+			return res, err
+		}
+	}
+
+	// define a handler function
+	handler := func(req *MicroRequest) (*MicroReply, error) {
+		b := req.HeaderGet("before")
+		if b != beforeValue {
+			t.Errorf("headers do not match, expected %s, received %s", b, beforeValue)
+		}
+		// reply := NewMicroReply(req.Data)
+		reply := NewMicroReplyFromRequest(req.Data, req)
+		return reply, nil
+	}
+
+	// Create test server and client
+	s, nm, nc := getServerServiceAndConn(t)
+
+	nm = nm.UseMicro(headerMiddleware, extraMiddleware)
+	defer nc.Close()
+	defer s.Shutdown()
+
+	t.Run("endpoint with middleware", func(t *testing.T) {
+		err := nm.AddMicroEndpoint("foo1", handler)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Create message and send a request
+		msg := nats.NewMsg("foo1")
+		msg.Data = []byte("data")
+
+		reply, err := nc.RequestMsg(msg, 1*time.Second)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		res := append(msg.Data, extraBytes...)
+		if !bytes.Equal(res, reply.Data) {
+			t.Errorf("responses do not match, expected %s, received %s", string(res), string(reply.Data))
+		}
+		a := reply.Header.Get("after")
+		if a != afterValue {
+			t.Errorf("headers do not match, expected %s, received %s", a, afterValue)
+		}
+		b := reply.Header.Get("before")
+		if b != beforeValue {
+			t.Errorf("headers do not match, expected %s, received %s", b, beforeValue)
+		}
+	})
+
+	t.Run("endpoint with middleware and group", func(t *testing.T) {
+		grp := nm.AddGroup("grp")
+		err := grp.AddMicroEndpoint("foo2", handler)
+		// sub := nr.Queue("group").Subject("foo2")
+		// _, err := sub.Subscribe(handler)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Create message and send a request
+		msg := nats.NewMsg("grp.foo2")
+		msg.Data = []byte("data")
+
+		reply, err := nc.RequestMsg(msg, 1*time.Second)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		res := append(msg.Data, extraBytes...)
+		if !bytes.Equal(res, reply.Data) {
+			t.Errorf("responses do not match, expected %s, received %s", string(res), string(reply.Data))
+		}
+	})
+}
+
 func TestError(t *testing.T) {
 	// define a handler that always fails
 	errHandler := func(req *Request) error {

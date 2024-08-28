@@ -43,6 +43,36 @@ func RequestIdMiddleware(tags ...string) func(next natsmicromw.ContextHandlerFun
 	}
 }
 
+// Same example with `MicroRequest` and `MicroReply`
+func RequestIdMicroMiddleware(tags ...string) func(next natsmicromw.MicroHandlerFunc) natsmicromw.MicroHandlerFunc {
+	return func(next natsmicromw.MicroHandlerFunc) natsmicromw.MicroHandlerFunc {
+		// If no tags are defined, then assume "request_id"
+		// Try a few variants since NATS headers are case-sensitive
+		if len(tags) == 0 {
+			tags = []string{"request_id", "Request_id", "Request_Id", "REQUEST_ID"}
+		}
+
+		return func(req *natsmicromw.MicroRequest) (*natsmicromw.MicroReply, error) {
+			var requestId string
+			// Try all possible tags until something is found
+			for _, tag := range tags {
+				requestId = req.HeaderGet(tag)
+				if requestId != "" {
+					break
+				}
+			}
+
+			// If nothing is found, generate one
+			if len(requestId) == 0 {
+				requestId = xid.New().String()
+			}
+
+			ctx := context.WithValue(req.Context(), requestIdContextKey{}, requestId)
+			return next(req.WithContext(ctx))
+		}
+	}
+}
+
 // Get current request Id from the context
 func RequestIdFromContext(ctx context.Context) string {
 	requestId, ok := ctx.Value(requestIdContextKey{}).(string)

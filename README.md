@@ -42,7 +42,7 @@ echoHandler := func(req micro.Request) {
     req.Respond(req.Data())
 }
 
-srv, err := micro.AddService(nc, micro.Config{
+srv, err := natsmicromw.AddService(nc, micro.Config{
     Name:        "EchoService",
     Version:     "1.0.0",
     // base handler
@@ -126,6 +126,40 @@ srv.AddContextEndpoint("echo", func(req *natsmicromw.Request) error {
     req.Respond(req.Data())
     return nil
 })
+```
+
+## New `MicroRequest` and `MicroReply` usage
+
+A third type of middleware adds support for a custom `MicroRequest` and `MicroReply`. The point of these structs is to enable the user to modify both the headers and data of any incoming request and outgoing reply. This also includes a new type of handler function that takes `MicroRequest` as a parameter and must return `MicroReply` and an `error`.
+
+```go
+func ContentChangeMiddleware(next natsmicromw.MicroHandlerFunc) natsmicromw.MicroHandlerFunc {
+    return func(req *natsmicromw.MicroRequest) (*natsmicromw.MicroReply, error) {
+        // Call the next function in the middleware chain (or the actual handler)
+        res, err := next(req)
+        if err != nil {
+            return res, err
+        }
+
+        // Prepend some data to the response
+        res.Data = append([]byte("Hello from Middleware: "), res.Data...)
+        return res, err
+    }
+}
+
+nc, _ := nats.Connect(nats.DefaultURL)
+
+// request handler
+echoHandler := func(req *natsmicromw.MicroRequest) (*natsmicromw.MicroReply, error) {
+    return natsmicromw.NewMicroReply(req.Data), nil
+}
+
+svc, err := natsmicromw.AddMicroService(nc, micro.Config{
+    Name:        "EchoService",
+    Version:     "1.0.0",
+}, ContentChangeMiddleware)
+
+g.AddMicroEndpoint("echo", echoHandler)
 ```
 
 ## Contributing
